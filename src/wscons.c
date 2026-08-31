@@ -54,7 +54,7 @@ wscons_udev_handler(void *data)
 	struct udev_device *udev_device;
 	struct libinput_seat *seat;
 	struct libinput_device *device;
-	uint64_t time;
+	usec_t time;
 	struct timespec ts;
 	struct libinput_event *event;
 	const char *action, *devnode, *sysname;
@@ -77,7 +77,7 @@ wscons_udev_handler(void *data)
 		if (!device)
 			goto out;
 		clock_gettime(CLOCK_REALTIME, &ts);
-		time = s2us(ts.tv_sec) + ns2us(ts.tv_nsec);
+		time = usec_from_timespec(&ts);
 		event = calloc(1, sizeof(*event));
 		post_device_event(device, time, LIBINPUT_EVENT_DEVICE_ADDED, event);
 	}
@@ -86,7 +86,7 @@ wscons_udev_handler(void *data)
 		list_for_each(device, &seat->devices_list, link) {
 			if (device->devname && strcmp(device->devname, devnode) == 0) {
 				clock_gettime(CLOCK_REALTIME, &ts);
-				time = s2us(ts.tv_sec) + ns2us(ts.tv_nsec);
+				time = usec_from_timespec(&ts);
 				event = calloc(1, sizeof(*event));
 				post_device_event(device, time, LIBINPUT_EVENT_DEVICE_REMOVED, event);
 				libinput_path_remove_device(device);
