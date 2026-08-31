@@ -29,7 +29,7 @@ MyVendor OEM::
     [MyVendor MyModel Touchpad]
     MatchName=Foo Bar Touchpad
     MatchUdevtype=touchpad
-    MatchDMIModAlias=dmi:*svnMyVendor:pnMyModel:*
+    MatchDMIModAlias=dmi:*:svnMyVendor:pnMyModel:*
     AttrEventCode=-BTN_RIGHT
 
 The name of the device can be obtained using :ref:`libinput record <libinput-record>`,
@@ -44,4 +44,3 @@ For reference, some example commits that add such a quirk are:
  - `bf61ab9bb0694d0ac3d60a7f815779abfe4886e6 <https://gitlab.freedesktop.org/libinput/libinput/-/commit/bf61ab9bb0694d0ac3d60a7f815779abfe4886e6>`__
  - `74fac6d040ac62048882dfb6f73da567ace6a6f5 <https://gitlab.freedesktop.org/libinput/libinput/-/commit/74fac6d040ac62048882dfb6f73da567ace6a6f5>`__
  - `89cd0f990e3bee9906754d6ca8484ed5aa392249 <https://gitlab.freedesktop.org/libinput/libinput/-/commit/89cd0f990e3bee9906754d6ca8484ed5aa392249>`__
-

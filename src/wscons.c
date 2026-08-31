@@ -24,11 +24,13 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <string.h>
 #include <time.h>
 
 #include "libinput.h"
 #include "filter.h"
+#include "util-time.h"
 #include "wscons.h"
 #include "input-event-codes.h"
 #include "libinput-util.h"
@@ -182,13 +184,16 @@ wscons_process(struct libinput_device *device, struct wscons_event *wsevent)
 {
 	enum libinput_button_state bstate;
 	enum libinput_key_state kstate;
-	struct normalized_coords accel;
+	struct normalized_coords delta = { 0, 0};
+	struct wheel_v120 v120 = { 0.0, 0.0 };
 	struct device_float_coords raw;
 	struct wscons_device *dev = wscons_device(device);
-	uint64_t time;
-	int button, key;
+	usec_t time;
+	uint32_t button;
+	int key;
+	keycode_t keycode;
 
-	time = s2us(wsevent->time.tv_sec) + ns2us(wsevent->time.tv_nsec);
+	time = usec_from_timespec(&wsevent->time);
 
 	switch (wsevent->type) {
 	case WSCONS_EVENT_KEY_UP:
@@ -204,8 +209,10 @@ wscons_process(struct libinput_device *device, struct wscons_event *wsevent)
 				return;
 			dev->old_value = key;
 		}
-		keyboard_notify_key(device, time,
-		    wskey_transcode(wscons_device(device)->scanCodeMap, key), kstate);
+		keycode = keycode_from_uint32_t(
+		                wskey_transcode(
+		                        wscons_device(device)->scanCodeMap, key));
+		keyboard_notify_key(device, time, keycode, kstate);
 		break;
 
 	case WSCONS_EVENT_MOUSE_UP:
@@ -226,13 +233,12 @@ wscons_process(struct libinput_device *device, struct wscons_event *wsevent)
 			bstate = LIBINPUT_BUTTON_STATE_RELEASED;
 		else
 			bstate = LIBINPUT_BUTTON_STATE_PRESSED;
-		pointer_notify_button(device, time, button, bstate);
+		pointer_notify_button(device, time, button_code_from_uint32_t(button), bstate);
 		break;
 
 	case WSCONS_EVENT_MOUSE_DELTA_X:
 	case WSCONS_EVENT_MOUSE_DELTA_Y:
 		memset(&raw, 0, sizeof(raw));
-		memset(&accel, 0, sizeof(accel));
 
 		if (wsevent->type == WSCONS_EVENT_MOUSE_DELTA_X)
 			raw.x = wsevent->value;
@@ -240,23 +246,36 @@ wscons_process(struct libinput_device *device, struct wscons_event *wsevent)
 			raw.y = -wsevent->value;
 
 		if (dev->pointer.filter) {
-			accel = filter_dispatch(dev->pointer.filter,
+			delta = filter_dispatch(dev->pointer.filter,
 			                        &raw,
 			                	device,
 			                	time);
 		} else {
-			accel.x = raw.x;
-			accel.y = raw.y;
+			delta.x = raw.x;
+			delta.y = raw.y;
 		}
 
-		pointer_notify_motion(device, time, &accel, &raw);
+		pointer_notify_motion(device, time, &delta, &raw);
 		break;
 
 	case WSCONS_EVENT_MOUSE_DELTA_Z:
-		memset(&raw, 0, sizeof(raw));
-		accel.x = 0;
-		accel.y = wsevent->value * 32;
-		axis_notify_event(device, time, &accel, &raw);
+		delta.x = 0;
+		delta.y = wsevent->value * 32;
+		v120.x = 0;
+		v120.y = wsevent->value * 120;
+		pointer_notify_axis_wheel(device, time,
+		                          bit(LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL),
+		                          &delta, &v120);
+		break;
+
+	case WSCONS_EVENT_MOUSE_DELTA_W:
+		delta.x = wsevent->value * 32;
+		delta.y = 0;
+		v120.x = wsevent->value * 120;
+		v120.y = 0;
+		pointer_notify_axis_wheel(device, time,
+		                          bit(LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL),
+		                          &delta, &v120);
 		break;
 
 	case WSCONS_EVENT_MOUSE_ABSOLUTE_X:
@@ -265,16 +284,22 @@ wscons_process(struct libinput_device *device, struct wscons_event *wsevent)
 		break;
 
 	case WSCONS_EVENT_HSCROLL:
-		memset(&raw, 0, sizeof(raw));
-		accel.x = wsevent->value/8;
-		accel.y = 0;
-		axis_notify_event(device, time, &accel, &raw);
+		delta.x = wsevent->value / 8;
+		delta.y = 0;
+		v120.x = wsevent->value / 16;
+		v120.y = 0;
+		pointer_notify_axis_wheel(device, time,
+		                          bit(LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL),
+		                          &delta, &v120);
 		break;
 	case WSCONS_EVENT_VSCROLL:
-		memset(&raw, 0, sizeof(raw));
-		accel.x = 0;
-		accel.y = wsevent->value/8;
-		axis_notify_event(device, time, &accel, &raw);
+		delta.x = 0;
+		delta.y = wsevent->value / 8;
+		v120.x = 0;
+		v120.y = wsevent->value / 16;
+		pointer_notify_axis_wheel(device, time,
+		                          bit(LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL),
+		                          &delta, &v120);
 		break;
 
 #ifdef WSCONS_EVENT_SYNC
@@ -307,7 +332,7 @@ wscons_device_dispatch(void *data)
 	ssize_t len;
 	int count, i;
 
-	len = read(device->fd, wsevents, sizeof(struct wscons_event));
+	len = read(device->fd, wsevents, sizeof(wsevents));
 	if (len <= 0 || (len % sizeof(struct wscons_event)) != 0)
 		return;
 
@@ -379,7 +404,7 @@ libinput_udev_assign_seat(struct libinput *libinput, const char *seat_id)
 
 	struct libinput_seat *seat;
 	struct libinput_device *device;
-	uint64_t time;
+	usec_t time;
 	struct timespec ts;
 	struct libinput_event *event;
 	struct udev_input *input = (struct udev_input*)libinput;
@@ -403,7 +428,7 @@ libinput_udev_assign_seat(struct libinput *libinput, const char *seat_id)
 	seat = wscons_seat_get(libinput, default_seat, default_seat_name);
 	list_for_each(device, &seat->devices_list, link) {
 		clock_gettime(CLOCK_REALTIME, &ts);
-		time = s2us(ts.tv_sec) + ns2us(ts.tv_nsec);
+		time = usec_from_timespec(&ts);
 		event = calloc(1, sizeof(*event));
 		post_device_event(device, time, LIBINPUT_EVENT_DEVICE_ADDED,
 		    event);
@@ -658,8 +683,18 @@ libinput_path_add_device(struct libinput *libinput,
 	return device;
 
 err:
-	if (device != NULL)
-		close_restricted(libinput, device->fd);
+	if (device != NULL) {
+		if (device->source)
+			libinput_remove_source(libinput, device->source);
+		if (device->devname) {
+			free(device->devname);
+			device->devname = NULL;
+		}
+		if (device->fd >= 0)
+			close_restricted(libinput, device->fd);
+	} else if (fd >= 0) {
+		close_restricted(libinput, fd);
+	}
 	free(wscons_device);
 	return NULL;
 }
