@@ -453,28 +453,33 @@ libinput_udev_create_context(const struct libinput_interface *interface,
 LIBINPUT_EXPORT int
 libinput_udev_assign_seat(struct libinput *libinput, const char *seat_id)
 {
-
 	struct libinput_seat *seat;
 	struct libinput_device *device;
 	usec_t time;
 	struct timespec ts;
 	struct libinput_event *event;
+	struct udev_list_entry *entry;
 	struct udev_input *input = (struct udev_input*)libinput;
+	struct udev *udev = input->udev;
 
 	/* Add standard devices */
-	for (int i = 0; i < 10; i++) {
-		char name[32];
-		int fd;
-		snprintf(name, sizeof(name), "/dev/wskbd%d", i);
-		if ((fd = open_restricted(libinput, name, O_RDWR|O_NONBLOCK)) >= 0) {
-			close_restricted(libinput, fd);
-			libinput_path_add_device(libinput, name);
+	_unref_(udev_enumerate) *e = udev_enumerate_new(udev);
+	udev_enumerate_add_match_subsystem(e, "input");
+	udev_enumerate_scan_devices(e);
+	udev_list_entry_foreach(entry, udev_enumerate_get_list_entry(e)) {
+		const char *path = udev_list_entry_get_name(entry);
+		_unref_(udev_device) *device = udev_device_new_from_syspath(udev, path);
+		if (!device)
+			continue;
+
+		const char *sysname = udev_device_get_sysname(device);
+		if ((!strstartswith(sysname, "wskbd")) &&
+		    (!strstartswith(sysname, "wsmouse")) {
+			continue;
 		}
-		snprintf(name, sizeof(name), "/dev/wsmouse%d", i);
-		if ((fd = open_restricted(libinput, name, O_RDWR|O_NONBLOCK)) >= 0) {
-			close_restricted(libinput, fd);
-			libinput_path_add_device(libinput, name);
-		}
+
+		const char *devnode = udev_device_get_devnode(device);
+		libinput_path_add_device(libinput, devnode);
 	}
 
 	seat = wscons_seat_get(libinput, default_seat, default_seat_name);
