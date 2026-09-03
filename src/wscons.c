@@ -473,12 +473,15 @@ libinput_udev_assign_seat(struct libinput *libinput, const char *seat_id)
 			continue;
 
 		const char *sysname = udev_device_get_sysname(device);
-		if ((!strstartswith(sysname, "wskbd")) &&
-		    (!strstartswith(sysname, "wsmouse")) {
+		if (!sysname &&
+		    !strstartswith(sysname, "wskbd") &&
+		    !strstartswith(sysname, "wsmouse")) {
 			continue;
 		}
 
 		const char *devnode = udev_device_get_devnode(device);
+		if (!devnode)
+			continue;
 		libinput_path_add_device(libinput, devnode);
 	}
 
