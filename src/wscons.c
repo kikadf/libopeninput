@@ -47,6 +47,7 @@ static void
 wscons_device_init_pointer_acceleration(struct wscons_device *device,
               struct motion_filter *filter);
 
+#if defined(__NetBSD__)
 static void
 wscons_udev_handler(void *data)
 {
@@ -164,6 +165,56 @@ udev_input_destroy(struct libinput *libinput)
 		input->udev = NULL;
 	}
 }
+
+#else   // OpenBSD
+static int
+udev_input_enable(struct libinput *libinput)
+{
+	struct libinput_seat *seat;
+	struct libinput_device *device;
+
+	seat = wscons_seat_get(libinput, default_seat, default_seat_name);
+	list_for_each(device, &seat->devices_list, link) {
+		device->fd = open_restricted(libinput, device->devname, O_RDWR);
+		device->source =
+		    libinput_add_fd(libinput, device->fd,
+			wscons_device_dispatch, device);
+		if (!device->source) {
+			return -ENOMEM;
+		}
+	}
+	return 0;
+}
+
+static void
+udev_input_disable(struct libinput *libinput)
+{
+	struct libinput_seat *seat;
+	struct libinput_device *device;
+
+	seat = wscons_seat_get(libinput, default_seat, default_seat_name);
+	list_for_each(device, &seat->devices_list, link) {
+		if (device->source) {
+			libinput_remove_source(libinput, device->source);
+			device->source = NULL;
+		}
+		close_restricted(libinput, device->fd);
+	}
+}
+
+static void
+udev_input_destroy(struct libinput *libinput)
+{
+	struct libinput_seat *seat;
+	struct libinput_device *device;
+
+	fprintf(stderr, "%s", __func__);
+	seat = wscons_seat_get(libinput, default_seat, default_seat_name);
+	list_for_each(device, &seat->devices_list, link) {
+		close_restricted(libinput, device->fd);
+	}
+}
+#endif  // if NetBSD else OpenBSD
 
 static int
 udev_device_change_seat(struct libinput_device *device,
@@ -373,6 +424,7 @@ wscons_seat_get(struct libinput *libinput, const char *seat_name_physical,
 	return seat;
 }
 
+#if defined(__NetBSD__)
 LIBINPUT_EXPORT struct libinput *
 libinput_udev_create_context(const struct libinput_interface *interface,
 			     void *user_data,
@@ -439,6 +491,63 @@ libinput_udev_assign_seat(struct libinput *libinput, const char *seat_id)
 
 	return 0;
 }
+
+#else   // OpenBSD
+LIBINPUT_EXPORT struct libinput *
+libinput_udev_create_context(const struct libinput_interface *interface,
+			     void *user_data,
+			     struct udev *udev)
+{
+	struct libinput *libinput;
+
+	libinput = calloc(1, sizeof(*libinput));
+	if (libinput == NULL)
+		return NULL;
+
+	if (libinput_init(libinput, interface, &interface_backend, user_data) != 0) {
+		free(libinput);
+		return NULL;
+	}
+	return libinput;
+}
+
+LIBINPUT_EXPORT int
+libinput_udev_assign_seat(struct libinput *libinput, const char *seat_id)
+{
+
+	struct libinput_seat *seat;
+	struct libinput_device *device;
+	usec_t time;
+	struct timespec ts;
+	struct libinput_event *event;
+
+	/* Add standard devices */
+	for (int i = 0; i < 10; i++) {
+		char name[32];
+		int fd;
+		snprintf(name, sizeof(name), "/dev/wskbd%d", i);
+		if ((fd = open_restricted(libinput, name, O_RDWR|O_NONBLOCK)) >= 0) {
+			close_restricted(libinput, fd);
+			libinput_path_add_device(libinput, name);
+		}
+		snprintf(name, sizeof(name), "/dev/wsmouse%d", i);
+		if ((fd = open_restricted(libinput, name, O_RDWR|O_NONBLOCK)) >= 0) {
+			close_restricted(libinput, fd);
+			libinput_path_add_device(libinput, name);
+		}
+	}
+
+	seat = wscons_seat_get(libinput, default_seat, default_seat_name);
+	list_for_each(device, &seat->devices_list, link) {
+		clock_gettime(CLOCK_REALTIME, &ts);
+		time = usec_from_timespec(&ts);
+		event = calloc(1, sizeof(*event));
+		post_device_event(device, time, LIBINPUT_EVENT_DEVICE_ADDED,
+		    event);
+	}
+	return 0;
+}
+#endif  // if NetBSD else OpenBSD
 
 LIBINPUT_EXPORT struct libinput *
 libinput_path_create_context(const struct libinput_interface *interface,

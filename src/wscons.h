@@ -25,12 +25,14 @@ struct wscons_device {
 	} pointer;
 };
 
+#if defined(__NetBSD__)
 struct udev_input {
 	struct libinput base;
 	struct udev *udev;
 	struct udev_monitor *udev_monitor;
 	struct libinput_source *udev_monitor_source;
 };
+#endif
 
 static inline struct wscons_device *
 wscons_device(struct libinput_device *device)
