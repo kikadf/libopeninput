@@ -473,9 +473,9 @@ libinput_udev_assign_seat(struct libinput *libinput, const char *seat_id)
 			continue;
 
 		const char *sysname = udev_device_get_sysname(device);
-		if (!sysname &&
-		    !strstartswith(sysname, "wskbd") &&
-		    !strstartswith(sysname, "wsmouse")) {
+		if (!sysname ||
+		   (!strstartswith(sysname, "wskbd") &&
+		    !strstartswith(sysname, "wsmouse"))) {
 			continue;
 		}
 
@@ -751,6 +751,14 @@ wscons_device_init(struct wscons_device *wscons_device)
 			return -1;
 	}
 	return 0;
+}
+
+void
+wscons_device_destroy(struct wscons_device *wscons_device)
+{
+	filter_destroy(wscons_device->pointer.filter);
+	free(wscons_device->base.devname);
+	free(wscons_device);
 }
 
 LIBINPUT_EXPORT struct libinput_device *

@@ -2096,9 +2096,8 @@ libinput_device_ref(struct libinput_device *device)
 static void
 libinput_device_destroy(struct libinput_device *device)
 {
-	// TODO
 	assert(list_empty(&device->event_listeners));
-	// wscons_device_destroy(evdev_device(device));
+	wscons_device_destroy(wscons_device(device));
 }
 
 LIBINPUT_EXPORT struct libinput_device *
